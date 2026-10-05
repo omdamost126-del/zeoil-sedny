@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سيدني تورز - syedny tours</title>
+    
+    <!-- إعدادات تطبيق الويب -->
+    <link rel="manifest" href="data:application/manifest+json;base64,ewogICJuYW1lIjogInN5ZWRueSB0b3VycyIsCiAgInNob3J0X25hbWUiOiAiU3llZG55IiwKICAic3RhcnRfdXJsIjogIi4vIiwKICAic3RhcnRfdXJsIjogIi4vIiwKICAiZGlzcGxheSI6ICJzdGFuZGFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjMEYxNzJBIiwKICAidGhlbWVfY29sb3IiOiAiI0Y1OUUwQiIsCiAgImljb25zIjogWwogICAgewogICAgICAic3JjIjogImh0dHBzOi8vZW1vamlob3N0LnMzLmFtYXpvbmF3cy5jb20vcy8xNThmY2I3Mi5wbmciLAogICAgICAic2l6ZXMiOiAiNTEycDUxMiIsCiAgICAgICJ0eXBlIjogImltYWdlL3BuZyIKICAgIH0KICBdCn0=">
+
+    <script>
+        const carPlates = [
+            "756", "9122", "427", "429", "739", "741", "742", "743", 
+            "432", "467", "469", "473", "475", "476", "485", "938", 
+            "937", "468", "549", "471", "472", "924", "925"
+        ];
+
+        const LOCAL_STORAGE_KEY = "syedny_tours_cars_data_v20";
+        let cars = [];
+        let currentFilter = 'all';
+        const DAILY_KM_RATE = 400; // معدل استهلاك اليوم الواحد
+
+        function initApp() {
+            const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+            if (saved) {
+                try {
+                    cars = JSON.parse(saved);
+                } catch(e) {
+                    cars = [];
+                }
+            }
+
+            if (!cars || cars.length === 0) {
+                cars = carPlates.map((plate, i) => ({
+                    id: `${i + 1}`,
+                    name: `سيارة رقم ${plate}`,
+                    plateNumber: plate,
+                    oldKm: 0,
+                    currentKm: "",
+                    oilInterval: 10000,
+                    history: []
+                }));
+                saveData();
+            }
+            renderCars();
+
+            setTimeout(() => {
+                const splash = document.getElementById('splashScreen');
+                if (splash) {
+                    splash.style.opacity = '0';
+                    setTimeout(() => splash.style.display = 'none', 500);
+                }
+            }, 2000);
+        }
+
+        function saveData() {
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cars));
+        }
+
+        function showSnackBar(msg, color = "#16A34A") {
+            const bar = document.getElementById('snackBar');
+            bar.innerText = msg;
+            bar.style.backgroundColor = color;
+            bar.style.display = 'block';
+            setTimeout(() => { bar.style.display = 'none'; }, 3000);
+        }
+
+        function resetAll() {
+            if (confirm('هل تريد حقاً تصفير جميع البيانات وإعادتها للوضع الابتدائي؟')) {
+                localStorage.removeItem(LOCAL_STORAGE_KEY);
+                currentFilter = 'all';
+                initApp();
+                showSnackBar('تم إعادة ضبط النظام بنجاح!', '#2563EB');
+            }
+        }
+
+        function setFilter(filterType) {
+            currentFilter = filterType;
+            renderCars();
+        }
+
+        function confirmAndArchive(id) {
+            const car = cars.find(c => c.id === id);
+            if (!car) return;
+
+            const oldInput = document.getElementById(`oldInput-${id}`);
+            const currInput = document.getElementById(`currentInput-${id}`);
+
+            if (!oldInput || !currInput) return;
+
+            const oldVal = parseInt(oldInput.value) || 0;
+            const currVal = parseInt(currInput.value);
+
+            if (isNaN(currVal)) {
+                showSnackBar('يرجى كتابة العداد الحالي أولاً!', '#D97706');
+                currInput.focus();
+                return;
+            }
+
+            if (currVal < oldVal) {
+                showSnackBar('خطأ: العداد الحالي أقل من عداد الغيار السابق!', '#EF4444');
+                return;
+            }
+
+            car.oldKm = oldVal;
+
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+
+            if (!car.history) car.history = [];
+            
+            car.history.unshift({
+                date: dateStr,
+                kmAtService: currVal,
+                oilInterval: car.oilInterval
+            });
+
+            car.oldKm = currVal;
+            car.currentKm = "";
+
+            saveData();
+            renderCars();
+            showSnackBar('تم حفظ التغيير وأرشفة العملية بنجاح تام! 🚀', '#16A34A');
+        }
+
+        function runCheck(id) {
+            const car = cars.find(c => c.id === id);
+            if (!car) return;
+
+            const oldInput = document.getElementById(`oldInput-${id}`);
+            const currInput = document.getElementById(`currentInput-${id}`);
+            const liveDiv = document.getElementById(`liveResult-${id}`);
+
+            const oldVal = parseInt(oldInput.value) || 0;
+            const currVal = parseInt(currInput.value);
+
+            if (isNaN(currVal)) {
+                showSnackBar('اكتب العداد الحالي لفحصه!', '#D97706');
+                return;
+            }
+
+            if (currVal < oldVal) {
+                liveDiv.innerHTML = '❌ خطأ: العداد الحالي أقل من العداد السابق!';
+                liveDiv.style.color = '#EF4444';
+                return;
+            }
+
+            const driven = currVal - oldVal;
+            const remaining = car.oilInterval - driven;
+            const approxDays = (remaining / DAILY_KM_RATE).toFixed(1);
+
+            if (driven >= car.oilInterval) {
+                liveDiv.innerHTML = `🚨 تجاوز موعد تغيير الزيت بـ ${driven - car.oilInterval} كم!`;
+                liveDiv.style.color = '#EF4444';
+            } else if (remaining <= 2000) {
+                liveDiv.innerHTML = `⚠️ تنبيه قرب الموعد! المتبقي: ${remaining} كم (تقريباً خلال ${approxDays} أيام بمعدل 400 كم/يوم)`;
+                liveDiv.style.color = '#FBBF24';
+            } else {
+                liveDiv.innerHTML = `✅ الحالة سليمة! المتبقي: ${remaining} كم (حوالي ${approxDays} يوم)`;
+                liveDiv.style.color = '#4ADE80';
+            }
+            showSnackBar('تم الفحص بنجاح', '#0D9488');
+        }
+
+        function sendWhatsAppAlert(id) {
+            const car = cars.find(c => c.id === id);
+            const currInput = document.getElementById(`currentInput-${id}`);
+            const currVal = parseInt(currInput ? currInput.value : 0) || 0;
+            const oldInput = document.getElementById(`oldInput-${id}`);
+            const oldVal = parseInt(oldInput ? oldInput.value : car.oldKm) || 0;
+
+            const nextChangeKm = oldVal + car.oilInterval;
+            const remainingKm = nextChangeKm - currVal;
+            const approxDays = (remainingKm / DAILY_KM_RATE).toFixed(1);
+
+            let statusText = "الحالة سليمة وآمنة ✅";
+            if (currVal > 0) {
+                if (currVal >= nextChangeKm) {
+                    statusText = `🚨 تجاوز موعد تغيير الزيت بـ (${currVal - nextChangeKm} كم)`;
+                } else if (remainingKm <= 2000) {
+                    statusText = `⚠️ اقترب موعد تغيير الزيت! المتبقي (${remainingKm} كم - تقريباً خلال ${approxDays} أيام)`;
+                } else {
+                    statusText = `✅ الحالة سليمة. المتبقي (${remainingKm} كم)`;
+                }
+            }
+
+            const message = `السيارة ${car.plateNumber} يرجي تغير الزيت العداد الحالي علي ${currVal || '______'} وهي هتغير علي ${nextChangeKm} يرجي تغير الزيت وارسال الريسيت والغيار الجاي علي كام وغيرت علي كام\n\n` +
+                            `📌 *تفاصيل إضافية للصيانة - سيدني تورز:*\n` +
+                            `• آخر غيار سابقة: ${oldVal} كم\n` +
+                            `• الموعد القادم المستهدف: ${nextChangeKm} كم\n` +
+                            `• الحالة: ${statusText}`;
+
+            window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`, '_blank');
+        }
+
+        function renderCars() {
+            const searchInput = document.getElementById('searchInput');
+            const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+            const list = document.getElementById('carList');
+            list.innerHTML = '';
+
+            let safeCount = 0, warningCount = 0, overdueCount = 0;
+
+            const processedCars = cars.map(car => {
+                const hasInput = car.currentKm !== "" && !isNaN(parseInt(car.currentKm));
+                const currentNum = hasInput ? parseInt(car.currentKm) : 0;
+                let status = 'safe';
+
+                if (hasInput && currentNum >= car.oldKm) {
+                    const driven = currentNum - car.oldKm;
+                    const remaining = car.oilInterval - driven;
+                    
+                    if (driven >= car.oilInterval) {
+                        status = 'overdue';
+                        overdueCount++;
+                    } else if (remaining <= 2000) { // اعتبار الأقل من أو يساوي 2000 كم (يعني أقل من 5 أيام بمعدل 400 كم) في خانة القريب من التغيير
+                        status = 'warning';
+                        warningCount++;
+                    } else {
+                        safeCount++;
+                    }
+                }
+                return { ...car, computedStatus: status, hasInput };
+            });
+
+            let filtered = processedCars.filter(car => {
+                const matchesSearch = car.plateNumber.includes(query) || car.name.toLowerCase().includes(query);
+                if (!matchesSearch) return false;
+
+                if (currentFilter === 'safe') return car.computedStatus === 'safe' && car.hasInput;
+                if (currentFilter === 'warning') return car.computedStatus === 'warning';
+                if (currentFilter === 'overdue') return car.computedStatus === 'overdue';
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                list.innerHTML = `<div class="welcome-msg">لا توجد سيارات مطابقة لهذا التصنيف أو البحث!</div>`;
+            } else {
+                filtered.forEach(car => {
+                    const lastRecord = car.history && car.history.length > 0 ? car.history[0] : null;
+
+                    const card = document.createElement('div');
+                    card.className = `car-card ${car.computedStatus === 'overdue' ? 'card-overdue' : (car.computedStatus === 'warning' ? 'card-warning' : '')}`;
+                    card.innerHTML = `
+                        <div class="car-header">
+                            <div>
+                                <span class="car-name">${car.name}</span>
+                                <span class="plate">${car.plateNumber}</span>
+                            </div>
+                            <div class="last-service">${lastRecord ? '📅 آخر تغيير: ' + lastRecord.date : 'لا يوجد أرشيف سابق'}</div>
+                        </div>
+                        <div class="car-body">
+                            <div class="inputs-row">
+                                <div class="input-group">
+                                    <label>عداد الغيار السابق:</label>
+                                    <input type="number" id="oldInput-${car.id}" value="${car.oldKm}">
+                                </div>
+                                <div class="input-group">
+                                    <label>عداد السيارة الحالي:</label>
+                                    <input type="number" id="currentInput-${car.id}" class="current" placeholder="أدخل العداد..." value="${car.currentKm}">
+                                </div>
+                            </div>
+                            <div class="live-calc-box" id="liveResult-${car.id}">
+                                ${car.hasInput ? (car.computedStatus === 'overdue' ? '🚨 متجاوز موعد تغيير الزيت!' : (car.computedStatus === 'warning' ? '⚠️ اقترب موعد تغيير الزيت (أقل من 5 أيام بمعدل 400 كم/يوم)!' : '✅ الحالة سليمة ومستقرة')) : 'اكتب العداد الحالي لمعرفة المتبقي فوراً...'}
+                            </div>
+                            <div class="actions-row">
+                                <button class="btn btn-check" onclick="runCheck('${car.id}')">فحص 🔍</button>
+                                <button class="btn btn-confirm" onclick="confirmAndArchive('${car.id}')">تأكيد التغيير والأرشفة 💾</button>
+                                <button class="btn btn-wa" onclick="sendWhatsAppAlert('${car.id}')">واتساب 📱</button>
+                            </div>
+                            <div class="history-title">سجل الأرشيف والصيانة السابقة:</div>
+                            <div class="history-list">
+                                ${car.history && car.history.length > 0 ? 
+                                    car.history.map(h => `<div class="history-item"><span>📅 ${h.date}</span><span>العداد: ${h.kmAtService} كم</span></div>`).join('') 
+                                    : '<div class="no-history">لا توجد عمليات صيانة مسجلة بعد</div>'}
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(card);
+                });
+            }
+
+            document.getElementById('totalCars').innerText = cars.length;
+            document.getElementById('safeCars').innerText = safeCount;
+            document.getElementById('warningCars').innerText = warningCount;
+            document.getElementById('overdueCars').innerText = overdueCount;
+        }
+
+        window.onload = function() {
+            initApp();
+            document.getElementById('searchInput').addEventListener('input', renderCars);
+        };
+    </script>
+
+    <style>
+        :root {
+            --bg-main: #0F172A;
+            --bg-card: #1E293B;
+            --accent: #F59E0B;
+            --text-main: #F8FAFC;
+            --text-sub: #94A3B8;
+            --border: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg-main); color: var(--text-main); padding-bottom: 20px; }
+        
+        #splashScreen {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-color: var(--bg-main);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+        .splash-content { text-align: center; padding: 20px; }
+        .splash-icon { font-size: 5rem; margin-bottom: 15px; animation: bounce 1.5s infinite; }
+        .splash-title { color: var(--accent); font-size: 1.5rem; font-weight: bold; margin-bottom: 8px; }
+        .splash-subtitle { color: var(--text-sub); font-size: 0.9rem; }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        header { background-color: var(--bg-main); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .header-title h1 { color: var(--accent); font-size: 1.1rem; font-weight: bold; }
+        .header-title p { color: var(--text-sub); font-size: 0.7rem; margin-top: 2px; }
+        
+        .stats-bar { display: flex; gap: 6px; padding: 10px 12px; background-color: var(--bg-card); }
+        .stat-card { flex: 1; background: var(--bg-main); padding: 8px 4px; border-radius: 10px; text-align: center; border: 1px solid var(--border); cursor: pointer; transition: 0.2s; }
+        .stat-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+        .stat-card .val { font-size: 0.9rem; font-weight: bold; }
+        .stat-card .lbl { font-size: 0.6rem; color: var(--text-sub); margin-top: 2px; }
+
+        .search-box { padding: 10px 12px; }
+        .search-box input { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--accent); background-color: var(--bg-card); color: white; outline: none; font-size: 0.85rem; text-align: center; }
+
+        .carList { padding: 0 12px; display: flex; flex-direction: column; gap: 12px; }
+        .car-card { background-color: var(--bg-card); border-radius: 14px; border: 1.2px solid var(--border); overflow: hidden; transition: 0.2s; }
+        .card-warning { border-color: #FBBF24; }
+        .card-overdue { border-color: #EF4444; }
+
+        .car-header { padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+        .car-name { font-weight: bold; font-size: 1rem; color: var(--accent); }
+        .plate { background: #334155; color: var(--accent); padding: 3px 8px; border-radius: 6px; font-size: 0.7rem; margin-right: 6px; }
+        .last-service { font-size: 0.6rem; color: var(--text-sub); }
+
+        .car-body { padding: 14px; }
+        .inputs-row { display: flex; gap: 8px; margin-bottom: 10px; }
+        .input-group { flex: 1; }
+        .input-group label { display: block; font-size: 0.65rem; color: var(--text-sub); margin-bottom: 4px; font-weight: bold; }
+        .input-group input { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-main); color: white; font-size: 0.8rem; font-weight: bold; outline: none; text-align: center; }
+        .input-group input.current { color: var(--accent); border-color: var(--accent); }
+
+        .live-calc-box { background: rgba(15, 23, 42, 0.9); border: 1px dashed var(--accent); padding: 8px; border-radius: 8px; margin-bottom: 12px; font-size: 0.75rem; font-weight: bold; text-align: center; }
+        
+        .actions-row { display: flex; gap: 6px; margin-bottom: 14px; }
+        .btn { flex: 1; padding: 10px 4px; border: none; border-radius: 8px; font-weight: bold; font-size: 0.7rem; cursor: pointer; color: white; text-align: center; }
+        .btn-check { background-color: #0D9488; }
+        .btn-confirm { background-color: #D97706; }
+        .btn-wa { background-color: #16A34A; }
+
+        .history-title { font-size: 0.7rem; font-weight: bold; color: var(--accent); margin-bottom: 6px; }
+        .history-list { max-height: 120px; overflow-y: auto; background: var(--bg-main); border-radius: 8px; border: 1px solid var(--border); }
+        .history-item { padding: 6px 10px; display: flex; justify-content: space-between; font-size: 0.65rem; border-bottom: 1px solid var(--border); }
+        .no-history { padding: 8px; font-size: 0.65rem; color: var(--text-sub); text-align: center; }
+        
+        .welcome-msg { text-align: center; padding: 25px; color: var(--text-sub); background: var(--bg-card); border-radius: 12px; border: 1px dashed var(--border); }
+        .snack-bar { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 16px; border-radius: 8px; font-size: 0.75rem; font-weight: bold; color: white; display: none; z-index: 1000; text-align: center; width: 90%; max-width: 400px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+
+    <div id="splashScreen">
+        <div class="splash-content">
+            <div class="splash-icon">🛢️🚗</div>
+            <div class="splash-title">أهلاً بك أ/ منى</div>
+            <div class="splash-subtitle">نظام متابعة تغيير زيت السيارات - سيدني تورز</div>
+        </div>
+    </div>
+
+    <header>
+        <div class="header-title">
+            <h1>سيدني تورز - syedny tours</h1>
+            <p>نظام متابعة تغيير زيت السيارات (حساب الأيام والمعدل اليومي)</p>
+        </div>
+        <button onclick="resetAll()" style="background:none; border:none; color:var(--accent); font-size:1.1rem; cursor:pointer;" title="إعادة ضبط">🔄</button>
+    </header>
+
+    <div class="stats-bar">
+        <div class="stat-card" onclick="setFilter('all')">
+            <div class="val" id="totalCars" style="color:var(--accent);">0</div>
+            <div class="lbl">الإجمالي (عرض الكل)</div>
+        </div>
+        <div class="stat-card" onclick="setFilter('safe')">
+            <div class="val" id="safeCars" style="color:#4ADE80;">0</div>
+            <div class="lbl">سليمة وآمنة</div>
+        </div>
+        <div class="stat-card" onclick="setFilter('warning')">
+            <div class="val" id="warningCars" style="color:#FBBF24;">0</div>
+            <div class="lbl">قريب من التغيير ⚠ (أقل من 5 أيام)</div>
+        </div>
+        <div class="stat-card" onclick="setFilter('overdue')">
+            <div class="val" id="overdueCars" style="color:#EF4444;">0</div>
+            <div class="lbl">متجاوز العداد 🚨</div>
+        </div>
+    </div>
+
+    <div class="search-box">
+        <input type="text" id="searchInput" placeholder="🔍 ابحث برقم اللوحة أو اسم السيارة...">
+    </div>
+
+    <div class="carList" id="carList"></div>
+    <div class="snack-bar" id="snackBar"></div>
+
+</body>
+</html>
